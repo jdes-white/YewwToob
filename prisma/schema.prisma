@@ -1,0 +1,126 @@
+// Phase 0 schema: proves persistence + retrieval for the transcript/analysis
+// pipeline. Deliberately minimal — see BUILD BRIEF for what's deferred.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProcessingStatus {
+  IMPORTED
+  FETCHING_TRANSCRIPT
+  TRANSCRIPT_READY
+  ANALYSING
+  READY
+  TRANSCRIPT_FAILED
+  ANALYSIS_FAILED
+}
+
+enum TranscriptProviderName {
+  FREE_TRANSCRIPT_API
+  SUPADATA
+}
+
+// Provider-level outcome, distinct from the video's overall ProcessingStatus.
+enum TranscriptResultCode {
+  SUCCESS
+  NO_CAPTIONS
+  VIDEO_NOT_FOUND
+  RATE_LIMITED
+  PROVIDER_DOWN
+  AUTH_ERROR
+  UNKNOWN_ERROR
+}
+
+model Creator {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  analysisProfile String // "jason_pizzino" | "michael_pizzino" — extraction profile key
+  createdAt       DateTime @default(now())
+  videos          Video[]
+}
+
+model Video {
+  id                 String           @id @default(cuid())
+  creatorId          String
+  creator            Creator          @relation(fields: [creatorId], references: [id])
+  youtubeUrl         String
+  youtubeVideoId     String           @unique
+  title              String?
+  publishedAt        DateTime?
+  importedAt         DateTime         @default(now())
+  processingStatus   ProcessingStatus @default(IMPORTED)
+  transcriptProvider TranscriptProviderName?
+  lastErrorCode      String?
+  lastErrorMessage   String?
+  updatedAt          DateTime         @updatedAt
+
+  transcript Transcript?
+  analyses   VideoAnalysis[]
+  importLogs ImportLog[]
+
+  @@index([creatorId])
+  @@index([processingStatus])
+}
+
+model Transcript {
+  id        String   @id @default(cuid())
+  videoId   String   @unique
+  video     Video    @relation(fields: [videoId], references: [id])
+  language  String?
+  fullText  String
+  provider  TranscriptProviderName
+  createdAt DateTime @default(now())
+
+  segments TranscriptSegment[]
+}
+
+model TranscriptSegment {
+  id              String     @id @default(cuid())
+  transcriptId    String
+  transcript      Transcript @relation(fields: [transcriptId], references: [id])
+  text            String
+  startSeconds    Float
+  durationSeconds Float
+  index           Int
+
+  @@index([transcriptId])
+}
+
+model VideoAnalysis {
+  id             String   @id @default(cuid())
+  videoId        String
+  video          Video    @relation(fields: [videoId], references: [id])
+  analysisType   String // e.g. "jason_pizzino_v1" | "michael_pizzino_v1"
+  structuredJson Json
+  createdAt      DateTime @default(now())
+  model          String
+  promptVersion  String
+
+  // Diagnostics-only: not "current" state, just a unique-per-video convenience
+  // for Phase 0 where one video gets one analysis unless explicitly re-run.
+  @@unique([videoId, analysisType])
+}
+
+// Privacy-safe diagnostic record of each import attempt, independent of the
+// Video's current state, so the health page can show recent history even
+// after a video moves on to a later processing state.
+model ImportLog {
+  id                 String    @id @default(cuid())
+  videoId            String?
+  video              Video?    @relation(fields: [videoId], references: [id])
+  youtubeUrl         String
+  stage              String // "transcript" | "analysis"
+  provider           String?
+  resultCode         String
+  errorMessage       String?
+  durationMs         Int?
+  createdAt          DateTime  @default(now())
+
+  @@index([createdAt])
+}
