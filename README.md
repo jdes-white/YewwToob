@@ -10,6 +10,12 @@ YouTube URL → transcript provider (with fallback) → Neon Postgres → Anthro
 before any polished product UI is built. See the Phase 0 completion report delivered alongside
 this repo for test results and current status.
 
+**This repository is also the technical test bench for a Lovable-built MVP.** See
+[`docs/lovable-handoff.md`](docs/lovable-handoff.md) for the proven (and explicitly-flagged-unproven)
+recipe — selected MVP creator, provider contract status, normalised transcript structure, the final
+analysis prompt/schema, minimum Lovable build scope, and the one blocker to resolve before spending
+Lovable credits.
+
 ## Stack
 
 - Next.js (App Router) + TypeScript + Tailwind CSS

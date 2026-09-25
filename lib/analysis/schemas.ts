@@ -23,8 +23,17 @@ const otherMentionSchema = z.object({
 export const jasonPizzinoAnalysisSchema = z.object({
   overallMarket: z.object({
     stance: z.string(),
+    // Short, explicit label so a reader doesn't have to infer direction from
+    // `stance` prose — added after a review-quality pass ahead of the
+    // Lovable MVP handoff (see docs/lovable-handoff.md).
+    expectedDirection: z.string(),
     summary: z.string(),
     evidence: z.array(z.string()),
+    // Macro/cycle turning points or time windows he flags (e.g. "expects a
+    // low around Q4 2026"), distinct from the per-asset price keyLevels
+    // below. Jason talks in cycle-timing terms more than exact price levels,
+    // so this is deliberately time/catalyst-oriented, not price-oriented.
+    turningPoints: z.array(z.string()),
     conditions: z.array(z.string()),
     invalidation: z.array(z.string()),
   }),

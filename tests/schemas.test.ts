@@ -2,7 +2,15 @@ import { describe, it, expect } from "vitest";
 import { jasonPizzinoAnalysisSchema, michaelPizzinoAnalysisSchema } from "@/lib/analysis/schemas";
 
 const validJason = {
-  overallMarket: { stance: "bullish", summary: "s", evidence: [], conditions: [], invalidation: [] },
+  overallMarket: {
+    stance: "bullish",
+    expectedDirection: "grinding higher into year-end",
+    summary: "s",
+    evidence: [],
+    turningPoints: ["watching for a Q4 2026 cycle low"],
+    conditions: [],
+    invalidation: [],
+  },
   btc: { stance: "bullish", structure: "uptrend", summary: "s", keyLevels: [], conditions: [], invalidation: [] },
   eth: { stance: "neutral", structure: "range", summary: "s", keyLevels: [], conditions: [], invalidation: [] },
   otherMentions: [{ asset: "SOL", note: "briefly mentioned" }],

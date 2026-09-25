@@ -117,4 +117,18 @@ describe("getTranscript — provider fallback", () => {
     expect(mockFreeFetch).toHaveBeenCalledTimes(1);
     expect(mockSupadataFetch).toHaveBeenCalledTimes(1);
   });
+
+  it("survives a malformed provider response (e.g. a JSON parse crash) as a typed UNKNOWN_ERROR instead of throwing", async () => {
+    // Providers are only contractually required to throw TranscriptProviderError, but a bad response
+    // (invalid JSON, a shape change) could throw a raw SyntaxError/TypeError instead. getTranscript
+    // must not propagate that uncaught — it should be caught, logged, and typed like any other failure.
+    mockFreeFetch.mockRejectedValue(new SyntaxError("Unexpected token < in JSON at position 0"));
+    mockSupadataFetch.mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'content')"));
+
+    const result = await getTranscript(VIDEO, URL_);
+
+    expect(result.code).toBe("UNKNOWN_ERROR");
+    expect(fakeDb.transcript.upsert).not.toHaveBeenCalled();
+    expect(fakeDb.importLog.create).toHaveBeenCalledTimes(2);
+  });
 });

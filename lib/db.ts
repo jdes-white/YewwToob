@@ -19,8 +19,22 @@ function createPrismaClient(): PrismaClient {
   return new PrismaClient({ adapter });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+function getPrismaClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createPrismaClient();
+  }
+  return globalForPrisma.prisma;
 }
+
+// Lazy proxy: merely importing this module must never touch DATABASE_URL or
+// open a connection, because Next.js's build-time route-data collection
+// imports every API route module (and therefore this one) without any
+// runtime environment configured. The real PrismaClient is constructed only
+// on first actual property access, i.e. the first request that uses it.
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getPrismaClient();
+    const value = Reflect.get(client as object, prop);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});

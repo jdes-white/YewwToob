@@ -65,7 +65,7 @@ const otherMentionsSchema = {
 } as const;
 
 const JASON_OUTPUT_SHAPE = `{
-  "overallMarket": { "stance": "", "summary": "", "evidence": [""], "conditions": [""], "invalidation": [""] },
+  "overallMarket": { "stance": "", "expectedDirection": "", "summary": "", "evidence": [""], "turningPoints": [""], "conditions": [""], "invalidation": [""] },
   "btc": { "stance": "", "structure": "", "summary": "", "keyLevels": [""], "conditions": [""], "invalidation": [""] },
   "eth": { "stance": "", "structure": "", "summary": "", "keyLevels": [""], "conditions": [""], "invalidation": [""] },
   "otherMentions": [ { "asset": "", "note": "" } ],
@@ -92,12 +92,14 @@ export const ANALYSIS_PROFILES: Record<string, AnalysisProfile> = {
           type: "object",
           properties: {
             stance: { type: "string" },
+            expectedDirection: { type: "string" },
             summary: { type: "string" },
             evidence: stringArray,
+            turningPoints: stringArray,
             conditions: stringArray,
             invalidation: stringArray,
           },
-          required: ["stance", "summary", "evidence", "conditions", "invalidation"],
+          required: ["stance", "expectedDirection", "summary", "evidence", "turningPoints", "conditions", "invalidation"],
           additionalProperties: false,
         },
         btc: jasonAssetView,
@@ -108,17 +110,25 @@ export const ANALYSIS_PROFILES: Record<string, AnalysisProfile> = {
       required: ["overallMarket", "btc", "eth", "otherMentions", "materialChanges"],
       additionalProperties: false,
     },
-    systemPrompt: `You are analysing a transcript of a Jason Pizzino market/crypto YouTube video.
-Extract, in his own terms as much as possible:
-- overall market structure, macro/economic cycle view, sentiment, risk-on/risk-off positioning
-- his BTC thesis and ETH thesis: stance, structure, summary, key levels ONLY where explicitly discussed,
+    systemPrompt: `You are writing a concise, information-dense review of a Jason Pizzino market/crypto YouTube video for
+someone who wants the substance without watching it. Extract, in his own terms as much as possible:
+- overall market structure, macro/economic cycle view, sentiment, risk-on/risk-off positioning (overallMarket.stance
+  and .summary)
+- expectedDirection: a short, direct label for where he thinks price/the market is headed next (e.g. "further
+  downside before a bottom", "grinding higher", "range-bound, no clear edge") — this is the single line a reader
+  most wants; do not leave it vague if he gave a clear view
+- turningPoints: any macro/cycle turning points, catalysts, or time windows he flags (e.g. "expects capitulation
+  low around Q4 2026", "watching the Fed meeting next month") — these are about WHEN or WHAT triggers a shift, as
+  distinct from price levels
+- his BTC thesis and ETH thesis: stance, structure, summary, key price levels ONLY where explicitly discussed,
   conditions for the view to hold, and what would invalidate/change it
 - brief mentions of any other crypto assets discussed (do NOT produce detailed altcoin analysis)
 - materialChanges: how this view differs from his previously stored view, if prior-view context is given below;
   otherwise an empty array
 
-Only state what is explicitly supported by the transcript. Do not invent price levels, dates, or claims that
-are not present. If a field is not discussed, use an empty string or empty array rather than guessing.`,
+Only state what is explicitly supported by the transcript. Do not invent price levels, dates, or claims that are
+not present. If a field is not discussed, use an empty string or empty array rather than guessing — never pad
+with filler to make a field look complete.`,
   },
   michael_pizzino: {
     analysisType: "michael_pizzino_v1",
