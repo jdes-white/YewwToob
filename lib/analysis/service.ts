@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import { getAnthropicClient, ANALYSIS_MODEL } from "@/lib/anthropic";
+import { OpenAiAnalysisProvider } from "@/lib/llm/openai";
+import { AnalysisProviderError } from "@/lib/llm/types";
 import { getAnalysisProfile, PROMPT_VERSION } from "./profiles";
 
 export type AnalysisFetchResult =
@@ -7,7 +8,15 @@ export type AnalysisFetchResult =
   | { code: "ANALYSIS_FAILED"; message: string };
 
 const MAX_TRANSCRIPT_CHARS = 150_000;
-const TOOL_NAME = "record_analysis";
+
+/**
+ * The active structured-analysis provider. Swapping providers (this project
+ * already did once, Anthropic -> OpenAI) means changing this one line plus
+ * adding a lib/llm/<provider>.ts implementing StructuredAnalysisProvider —
+ * nothing else in this file, or in lib/analysis/profiles.ts or schemas.ts,
+ * needs to change.
+ */
+const analysisProvider = new OpenAiAnalysisProvider();
 
 async function loadPriorViewContext(creatorId: string, analysisType: string, excludeVideoId: string): Promise<string | null> {
   const prior = await prisma.videoAnalysis.findFirst({
@@ -56,38 +65,18 @@ export async function analyzeVideo(
 
   const startedAt = Date.now();
   let structuredJson: unknown;
+  let modelUsed: string;
   try {
-    const client = getAnthropicClient();
-    const response = await client.messages.create({
-      model: ANALYSIS_MODEL,
-      max_tokens: 4096,
-      system: profile.systemPrompt,
-      tools: [
-        {
-          name: TOOL_NAME,
-          description: `Record the structured analysis. Match this shape exactly:\n${profile.outputShape}`,
-          input_schema: profile.toolInputSchema as never,
-        },
-      ],
-      tool_choice: { type: "tool", name: TOOL_NAME },
-      messages: [{ role: "user", content: userMessage }],
+    const result = await analysisProvider.generate({
+      systemPrompt: profile.systemPrompt,
+      userMessage,
+      schema: profile.schema,
+      schemaName: profile.schemaName,
     });
-
-    const toolUse = response.content.find((block) => block.type === "tool_use");
-    if (!toolUse || toolUse.type !== "tool_use") {
-      await logAnalysisAttempt(video.id, "FAILED", "Model did not return a tool_use block", Date.now() - startedAt);
-      return { code: "ANALYSIS_FAILED", message: "Model did not return structured output" };
-    }
-    structuredJson = toolUse.input;
+    structuredJson = result.data;
+    modelUsed = result.model;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown Anthropic API error";
-    await logAnalysisAttempt(video.id, "FAILED", message, Date.now() - startedAt);
-    return { code: "ANALYSIS_FAILED", message };
-  }
-
-  const validation = profile.schema.safeParse(structuredJson);
-  if (!validation.success) {
-    const message = `Schema validation failed: ${validation.error.issues.map((i) => i.message).join("; ")}`;
+    const message = err instanceof AnalysisProviderError || err instanceof Error ? err.message : "Unknown analysis provider error";
     await logAnalysisAttempt(video.id, "FAILED", message, Date.now() - startedAt);
     return { code: "ANALYSIS_FAILED", message };
   }
@@ -97,19 +86,19 @@ export async function analyzeVideo(
     create: {
       videoId: video.id,
       analysisType: profile.analysisType,
-      structuredJson: JSON.parse(JSON.stringify(validation.data)),
-      model: ANALYSIS_MODEL,
+      structuredJson: JSON.parse(JSON.stringify(structuredJson)),
+      model: modelUsed,
       promptVersion: PROMPT_VERSION,
     },
     update: {
-      structuredJson: JSON.parse(JSON.stringify(validation.data)),
-      model: ANALYSIS_MODEL,
+      structuredJson: JSON.parse(JSON.stringify(structuredJson)),
+      model: modelUsed,
       promptVersion: PROMPT_VERSION,
     },
   });
 
   await logAnalysisAttempt(video.id, "SUCCESS", null, Date.now() - startedAt);
-  return { code: "SUCCESS", analysisId: saved.id, structuredJson: validation.data, reused: false };
+  return { code: "SUCCESS", analysisId: saved.id, structuredJson, reused: false };
 }
 
 async function logAnalysisAttempt(videoId: string, resultCode: "SUCCESS" | "FAILED", errorMessage: string | null, durationMs: number): Promise<void> {
@@ -119,7 +108,7 @@ async function logAnalysisAttempt(videoId: string, resultCode: "SUCCESS" | "FAIL
       videoId,
       youtubeUrl: video?.youtubeUrl ?? "",
       stage: "analysis",
-      provider: ANALYSIS_MODEL,
+      provider: analysisProvider.name,
       resultCode,
       errorMessage,
       durationMs,

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { FreeTranscriptApiProvider } from "@/lib/transcript/freeTranscriptApi";
 import { SupadataProvider } from "@/lib/transcript/supadata";
-import { TranscriptProviderError } from "@/lib/transcript/types";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -9,10 +8,6 @@ function jsonResponse(status: number, body: unknown): Response {
 
 describe("FreeTranscriptApiProvider", () => {
   const originalFetch = global.fetch;
-
-  beforeEach(() => {
-    process.env.FREE_TRANSCRIPT_API_KEY = "test-key";
-  });
 
   afterEach(() => {
     global.fetch = originalFetch;
@@ -24,7 +19,7 @@ describe("FreeTranscriptApiProvider", () => {
       jsonResponse(200, {
         language: "en",
         title: "Test Video",
-        segments: [
+        transcript: [
           { text: "Hello", start: 0, duration: 2 },
           { text: "world", start: 2, duration: 1.5 },
         ],
@@ -45,6 +40,40 @@ describe("FreeTranscriptApiProvider", () => {
       fullText: "Hello world",
       provider: "FREE_TRANSCRIPT_API",
     });
+  });
+
+  it("works without an API key (confirmed keyless free tier) and sends no Authorization header", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(jsonResponse(200, { language: "en", transcript: [{ text: "hi", start: 0, duration: 1 }] }));
+    global.fetch = fetchSpy;
+    const provider = new FreeTranscriptApiProvider();
+
+    await provider.fetchTranscript("abc12345678");
+
+    const [, init] = fetchSpy.mock.calls[0]!;
+    expect((init as RequestInit).headers).toEqual({});
+  });
+
+  it("sends an Authorization header when an API key is configured", async () => {
+    process.env.FREE_TRANSCRIPT_API_KEY = "test-key";
+    const fetchSpy = vi.fn().mockResolvedValue(jsonResponse(200, { language: "en", transcript: [{ text: "hi", start: 0, duration: 1 }] }));
+    global.fetch = fetchSpy;
+    const provider = new FreeTranscriptApiProvider();
+
+    await provider.fetchTranscript("abc12345678");
+
+    const [, init] = fetchSpy.mock.calls[0]!;
+    expect((init as RequestInit).headers).toEqual({ Authorization: "Bearer test-key" });
+  });
+
+  it("sends the video as a video_url query parameter", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(jsonResponse(200, { language: "en", transcript: [{ text: "hi", start: 0, duration: 1 }] }));
+    global.fetch = fetchSpy;
+    const provider = new FreeTranscriptApiProvider();
+
+    await provider.fetchTranscript("abc12345678");
+
+    const calledUrl = new URL(fetchSpy.mock.calls[0]![0] as string);
+    expect(calledUrl.searchParams.get("video_url")).toBe("https://www.youtube.com/watch?v=abc12345678");
   });
 
   it("maps a 401 response to AUTH_ERROR", async () => {
@@ -72,20 +101,10 @@ describe("FreeTranscriptApiProvider", () => {
   });
 
   it("maps zero segments to NO_CAPTIONS", async () => {
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse(200, { language: "en", segments: [] }));
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse(200, { language: "en", transcript: [] }));
     const provider = new FreeTranscriptApiProvider();
 
     await expect(provider.fetchTranscript("abc12345678")).rejects.toMatchObject({ code: "NO_CAPTIONS" });
-  });
-
-  it("throws AUTH_ERROR without hitting the network when no API key is configured", async () => {
-    delete process.env.FREE_TRANSCRIPT_API_KEY;
-    const fetchSpy = vi.fn();
-    global.fetch = fetchSpy;
-    const provider = new FreeTranscriptApiProvider();
-
-    await expect(provider.fetchTranscript("abc12345678")).rejects.toBeInstanceOf(TranscriptProviderError);
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

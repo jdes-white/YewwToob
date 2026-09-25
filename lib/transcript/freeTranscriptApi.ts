@@ -7,14 +7,24 @@ const PROVIDER_NAME = "FREE_TRANSCRIPT_API" as const;
 const DEFAULT_BASE_URL = "https://api.freetranscriptapi.com/v1";
 
 /**
- * NOTE ON FIELD MAPPING: this adapter targets FreeTranscriptAPI's documented
- * REST shape (Bearer auth, GET /transcript?video_id=...&format=json). The
- * exact response field names could not be verified against live docs from
- * this build environment (outbound access to the docs domain was blocked),
- * so `extractSegments` below accepts several plausible key spellings. If
- * the real API differs, only this file needs to change — the rest of the
- * app depends on `NormalisedTranscript`, not on this shape. See the Phase 0
- * completion report's KNOWN RISKS section.
+ * Targets FreeTranscriptAPI.com — confirmed as a real, current product
+ * (https://freetranscriptapi.com/, API at api.freetranscriptapi.com/v1/transcript)
+ * with the request/response shape below verified against its own published
+ * documentation and examples, though not against a live call from this
+ * build environment (outbound access to freetranscriptapi.com is blocked
+ * from this sandbox).
+ *
+ * Confirmed:
+ *  - GET {base}/transcript?video_url=<url-or-bare-video-id>
+ *  - No API key or signup required for the free tier (50 requests/hour/IP).
+ *    An API key is optional — only sent if FREE_TRANSCRIPT_API_KEY is set,
+ *    for the higher-limit authenticated tier.
+ *  - Response includes `language`, `title`, and `transcript` fields.
+ *
+ * Not confirmed: the exact per-segment field names within `transcript`
+ * (timestamp/text field spellings) — `extractSegments` below accepts
+ * several plausible spellings defensively. If the real API differs, only
+ * this file needs to change.
  */
 
 function firstDefined<T>(...values: (T | undefined | null)[]): T | undefined {
@@ -27,8 +37,8 @@ function firstDefined<T>(...values: (T | undefined | null)[]): T | undefined {
 function extractSegments(payload: unknown): NormalisedTranscriptSegment[] {
   const raw = (payload as Record<string, unknown>) ?? {};
   const list = firstDefined<unknown[]>(
-    raw.segments as unknown[],
     raw.transcript as unknown[],
+    raw.segments as unknown[],
     raw.items as unknown[],
   );
   if (!Array.isArray(list)) return [];
@@ -52,30 +62,20 @@ function extractSegments(payload: unknown): NormalisedTranscriptSegment[] {
 export class FreeTranscriptApiProvider implements TranscriptProvider {
   readonly name = PROVIDER_NAME;
 
-  private get apiKey(): string {
-    const key = process.env.FREE_TRANSCRIPT_API_KEY;
-    if (!key) {
-      throw new TranscriptProviderError("AUTH_ERROR", PROVIDER_NAME, "FREE_TRANSCRIPT_API_KEY is not configured");
-    }
-    return key;
-  }
-
   private get baseUrl(): string {
     return process.env.FREE_TRANSCRIPT_API_BASE_URL ?? DEFAULT_BASE_URL;
   }
 
   async fetchTranscript(videoId: string): Promise<NormalisedTranscript> {
     const url = new URL(`${this.baseUrl}/transcript`);
-    url.searchParams.set("video_id", videoId);
-    url.searchParams.set("format", "json");
-    url.searchParams.set("include_timestamp", "true");
-    url.searchParams.set("send_metadata", "true");
+    url.searchParams.set("video_url", `https://www.youtube.com/watch?v=${videoId}`);
+
+    const apiKey = process.env.FREE_TRANSCRIPT_API_KEY;
+    const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 
     let response: Response;
     try {
-      response = await fetchWithTimeout(url.toString(), {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-      });
+      response = await fetchWithTimeout(url.toString(), { headers });
     } catch (err) {
       throw new TranscriptProviderError(
         "PROVIDER_DOWN",

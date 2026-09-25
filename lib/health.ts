@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import { getAnthropicClient, ANALYSIS_MODEL } from "@/lib/anthropic";
+import OpenAI from "openai";
+import { ANALYSIS_MODEL } from "@/lib/llm/openai";
 import { FreeTranscriptApiProvider } from "@/lib/transcript/freeTranscriptApi";
 import { SupadataProvider } from "@/lib/transcript/supadata";
 import { TranscriptProviderError } from "@/lib/transcript/types";
@@ -21,38 +22,36 @@ export async function checkDatabase(): Promise<HealthCheckResult> {
   const checkedAt = new Date().toISOString();
   try {
     await prisma.$queryRaw`SELECT 1`;
-    return { name: "Database", state: "CONNECTED", detail: "Neon Postgres reachable via Prisma", checkedAt };
+    return { name: "Database", state: "CONNECTED", detail: "Postgres reachable via Prisma", checkedAt };
   } catch (err) {
     return { name: "Database", state: "FAILED", detail: safeMessage(err), checkedAt };
   }
 }
 
-export async function checkAnthropic(): Promise<HealthCheckResult> {
+export async function checkOpenAi(): Promise<HealthCheckResult> {
   const checkedAt = new Date().toISOString();
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return { name: "Anthropic", state: "NOT_CONFIGURED", detail: "ANTHROPIC_API_KEY not set", checkedAt };
+  if (!process.env.OPENAI_API_KEY) {
+    return { name: "OpenAI", state: "NOT_CONFIGURED", detail: "OPENAI_API_KEY not set", checkedAt };
   }
   try {
-    const client = getAnthropicClient();
-    await client.messages.create({
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    await client.responses.create({
       model: ANALYSIS_MODEL,
-      max_tokens: 1,
-      messages: [{ role: "user", content: "ping" }],
+      input: "ping",
+      max_output_tokens: 16,
     });
-    return { name: "Anthropic", state: "CONNECTED", detail: `Reached ${ANALYSIS_MODEL}`, checkedAt };
+    return { name: "OpenAI", state: "CONNECTED", detail: `Reached ${ANALYSIS_MODEL}`, checkedAt };
   } catch (err) {
-    return { name: "Anthropic", state: "FAILED", detail: safeMessage(err), checkedAt };
+    return { name: "OpenAI", state: "FAILED", detail: safeMessage(err), checkedAt };
   }
 }
 
 export async function checkFreeTranscriptApi(): Promise<HealthCheckResult> {
   const checkedAt = new Date().toISOString();
-  if (!process.env.FREE_TRANSCRIPT_API_KEY) {
-    return { name: "FreeTranscriptAPI", state: "NOT_CONFIGURED", detail: "FREE_TRANSCRIPT_API_KEY not set", checkedAt };
-  }
   try {
     await new FreeTranscriptApiProvider().fetchTranscript(PROBE_VIDEO_ID);
-    return { name: "FreeTranscriptAPI", state: "CONNECTED", detail: "Probe transcript fetched successfully", checkedAt };
+    const mode = process.env.FREE_TRANSCRIPT_API_KEY ? "authenticated" : "keyless free tier";
+    return { name: "FreeTranscriptAPI", state: "CONNECTED", detail: `Probe transcript fetched successfully (${mode})`, checkedAt };
   } catch (err) {
     return { name: "FreeTranscriptAPI", state: "FAILED", detail: safeMessage(err), checkedAt };
   }

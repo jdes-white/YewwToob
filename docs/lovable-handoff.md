@@ -28,62 +28,56 @@ Between the two brief profiles, **Jason Pizzino** is the better first test subje
   `lib/analysis/schemas.ts`, unchanged this round) for Claude Code to reintroduce after the Lovable
   handoff. Lovable does not need to know Michael exists.
 
-## 2. What was proven with REAL external services this round — and what was not
+## 2. What was proven with REAL external services — and what was not
 
-**Be precise about this: no live call to YouTube, FreeTranscriptAPI, Supadata, Neon, or the app's own
-Anthropic integration was possible in this session.** This is a network-policy fact, not a shortcut:
+Updated across two rounds. This sandbox's own outbound network access is still hard-blocked for
+everything except `api.anthropic.com` and package registries (confirmed via the egress proxy's own
+status endpoint — YouTube, Supadata, FreeTranscriptAPI, Neon, and even this app's own deployed URL
+all get a policy-denied `403` at the CONNECT stage). What changed is that **real infrastructure now
+exists outside this sandbox**, provisioned via Render's API (already-connected account, zero
+dashboard steps):
 
-```
-$ curl https://api.freetranscriptapi.com/...   → CONNECT tunnel failed, response 403 (policy denial)
-$ curl https://api.supadata.ai/...             → CONNECT tunnel failed, response 403 (policy denial)
-$ curl https://www.youtube.com                 → CONNECT tunnel failed, response 403 (policy denial)
-$ curl https://neon.tech                       → CONNECT tunnel failed, response 403 (policy denial)
-$ curl https://api.anthropic.com/v1/messages   → HTTP 405 (domain reachable, but no request-signing
-                                                   credential available to this session for a real call)
-```
+- A real Render Postgres database (`yewwtoob-phase0`) — live.
+- A real Render web service deploying this exact GitHub branch — live, and a real deploy has already
+  been run against it (not simulated): it correctly builds with zero env vars, and correctly fails at
+  exactly the "DATABASE_URL is required" point once a database is expected but not yet connected. That
+  failure was itself real evidence, not mocked — see §6b.
 
-The sandbox's egress proxy allowlists only `api.anthropic.com` (and package registries) — confirmed via
-its own status endpoint, not inferred. No `DATABASE_URL`, `FREE_TRANSCRIPT_API_KEY`, `SUPADATA_API_KEY`,
-or `ANTHROPIC_API_KEY` is configured in this environment either, so even the allowlisted Anthropic
-endpoint can't be used for a real signed request from here.
-
-**REAL (verified this round):**
-- A real, current, public Jason Pizzino video was identified via web search (not fabricated): *"The
+**REAL (verified):**
+- A real, current, public Jason Pizzino video, identified via web search (not fabricated): *"The
   Bitcoin Target No One Wants to Hear"*, published June 6, 2026 —
-  `https://www.youtube.com/watch?v=95Sg5orepBE` (video ID `95Sg5orepBE`). This is the recommended first
-  real test video once credentials/network exist.
-- Real (if thin) content signal about Jason's actual current public stance, from search snippets, not
-  invented: he has forecast "up to a year of lower lows" for Bitcoin with a possible cycle low as late as
-  October 2026, and a more recent video ("This Bear Is Now Bullish on Bitcoin," July 2026) suggests a
-  shift in his view. This is genuine, sourced, real-world grounding — used only to sanity-check that the
-  schema has somewhere to put "a stance that flips" (`stance` + `expectedDirection` +
-  `materialChanges`) — **it is not a transcript and was not run through the pipeline.**
+  `https://www.youtube.com/watch?v=95Sg5orepBE` (video ID `95Sg5orepBE`). Recommended first real test
+  video.
+- FreeTranscriptAPI.com confirmed as a real, current product via multiple independent search results
+  (not a single adapter's guess): official site, real endpoint (`api.freetranscriptapi.com/v1/transcript`),
+  a documented `video_url` query parameter (confirmed via a published curl example), and confirmation
+  that **no API key or signup is required** for its free tier (50 requests/hour/IP). This meaningfully
+  de-risks what was previously an open question — see §3.
 - All application-level logic — URL parsing, provider HTTP-status→failure-code mapping, transcript
-  normalisation, provider fallback ordering, duplicate-prevention, Zod schema validation (including a
-  new drift test between the hand-written tool-call JSON Schema and the Zod schema — see §6) — is
-  covered by 52 passing automated tests using mocked `fetch`/mocked DB, `npx eslint .` clean, `npx tsc
-  --noEmit` clean, `npx next build` clean (see §7).
+  normalisation, provider fallback ordering, duplicate-prevention, Zod schema validation, the OpenAI
+  provider wrapper's success/failure/incomplete-response handling, and the Basic Auth gate — is covered
+  by 57 passing automated tests using mocked `fetch`/mocked OpenAI SDK/mocked DB, `npx eslint .` clean,
+  `npx tsc --noEmit` clean, `npm run build` clean with zero env vars (see §7).
 
 **MOCK-ONLY / UNPROVEN (be honest with yourself about this before you trust the recipe):**
-- FreeTranscriptAPI's and Supadata's *actual* response field names. The adapters in this repo
-  (`lib/transcript/freeTranscriptApi.ts`, `lib/transcript/supadata.ts`) are a best-effort implementation
-  against publicly-described behaviour (endpoint shape, Bearer/`x-api-key` auth, a `mode=native` param on
-  Supadata to force native-caption-only retrieval) — **not verified against a live response**, because
-  outbound access to their docs and APIs was blocked from every environment available to this session.
-- Any real Anthropic call using the app's own SDK integration, and therefore the model's actual output
+- Supadata's *actual* response field names, and FreeTranscriptAPI's per-segment field names within its
+  confirmed `transcript` array — both still best-effort, isolated to their adapter files.
+- Any real OpenAI call using the app's own SDK integration, and therefore the model's actual output
   quality on this exact prompt/schema.
-- Any real Neon Postgres read/write.
+- Any real read/write against the now-live Render Postgres database, or a real request against the
+  now-live Render web service — both exist and are reachable from the internet, just not from this
+  sandbox. See §10.
 
 ## 3. Provider contract — status
 
-| Provider | Endpoint shape coded | Auth | Native-caption enforcement | Verified live? |
+| Provider | Endpoint shape | Auth | Native-caption enforcement | Verified how |
 |---|---|---|---|---|
-| FreeTranscriptAPI (primary) | `GET {base}/transcript?video_id=&format=json&include_timestamp=true&send_metadata=true`, `Authorization: Bearer <key>` | Bearer | N/A (no ASR fallback offered by this provider AFAIK) | **No** |
-| Supadata (fallback) | `GET {base}/youtube/transcript?videoId=&mode=native&text=false`, `x-api-key: <key>` | API key header | `mode=native` hardcoded — never omit this param, it's what stops Supadata silently falling back to AI transcription | **No** |
+| FreeTranscriptAPI (primary) | `GET {base}/transcript?video_url=<url>` | None required (keyless free tier); optional `Authorization: Bearer <key>` for the paid tier | N/A (no ASR fallback offered by this provider) | Endpoint, param name, and keyless-access confirmed via the vendor's own site and published examples (search-verified, not a live call) |
+| Supadata (fallback) | `GET {base}/youtube/transcript?videoId=&mode=native&text=false`, `x-api-key: <key>` | API key header, required | `mode=native` hardcoded — never omit this param, it's what stops Supadata silently falling back to AI transcription | Unchanged from the original round — search-verified product/docs, not a live call |
 
-Both adapters parse defensively (accept a few plausible field-name spellings — see the `firstDefined`
-helper in each file) specifically *because* the real shape is unverified. **Do not treat this table as
-gospel.** See §9.
+Both adapters still parse defensively (accept a few plausible field-name spellings — see the
+`firstDefined` helper in each file) for exactly the fields not independently confirmed above. **Do
+not treat unconfirmed fields as gospel.** See §9.
 
 ## 4. Normalised transcript structure (proven design, not proven against a live payload)
 
@@ -185,29 +179,33 @@ this to Lovable as the literal system prompt, do not ask Lovable to write its ow
 > that are not present. If a field is not discussed, use an empty string or empty array rather than
 > guessing — never pad with filler to make a field look complete.
 
-**Model:** default to the cheapest Anthropic model that reliably completes this (Haiku). One call per
-video — never split into separate summary/BTC/ETH calls.
+**LLM provider: OpenAI** (changed this round from the original Anthropic integration — a deliberate
+product decision, not a technical fallback; see §6 for why the swap was clean). Use the Responses API
+with Structured Outputs (`text.format: { type: "json_schema", strict: true }`), generating the JSON
+Schema directly from whatever schema representation your backend uses rather than hand-authoring a
+parallel one — see §6 for why that matters. Default to the cheapest current model that reliably
+completes this extraction (this repo defaults to `gpt-5.6-luna`, override via env var — verify current
+naming/pricing yourself, this was current as of this integration but not pinned as gospel). One call
+per video — never split into separate summary/BTC/ETH calls.
 
-**Caveat, restated:** this prompt has been *designed and structurally tested* (schema self-consistency,
-see §6) — it has **not** been run against a real transcript and a real model call. Its output quality is
-unverified. Budget for at least one real iteration once Lovable (or this repo, from an unrestricted
-environment) can actually call Anthropic.
+**Caveat, restated:** this prompt has been *designed and structurally tested* — it has **not** been run
+against a real transcript and a real model call. Its output quality is unverified. Budget for at least
+one real iteration once real infrastructure (now live on Render, see §2) has real credentials.
 
-## 6. Technical issue found and fixed this round
+## 6. Technical issue found (Anthropic round) and how the OpenAI swap fixed its root cause
 
-Adding `expectedDirection`/`turningPoints` to the Zod schema without also updating the hand-authored
-Anthropic tool-call JSON Schema would have silently broken analysis in production — the model would
-never be asked for the new fields, so real output would fail our own validation. This is exactly the
-"malformed provider response" failure class the brief asks to guard against, except self-inflicted.
-Caught and fixed by:
-- Updating both `jasonPizzinoAnalysisSchema` (Zod) and `ANALYSIS_PROFILES.jason_pizzino.toolInputSchema`
-  (hand-written JSON Schema) together.
-- Adding `tests/profile-schema-consistency.test.ts`: builds the minimal object each profile's
-  `toolInputSchema` declares valid and asserts the corresponding Zod schema accepts it. This test would
-  have caught the bug above, and will catch the next one. **Recommend Lovable's backend function apply
-  the same two-artifacts-must-agree discipline** if it re-expresses the schema in its own backend
-  language — or better, just serialise/consume this repo's JSON Schema and Zod schema directly rather
-  than hand-transcribing them a third time.
+Originally, adding `expectedDirection`/`turningPoints` to the Zod schema without also updating a
+hand-authored Anthropic tool-call JSON Schema silently broke analysis — the model was never asked for
+the new fields, so real output would have failed our own validation. That was caught by a dedicated
+drift test at the time.
+
+**The OpenAI swap eliminated this bug class structurally, not just tested-against-it.** OpenAI's Node
+SDK ships a `zodTextFormat` helper (`openai/helpers/zod`) that generates the strict JSON Schema handed
+to the model *directly from the same Zod schema* used to validate the response — there is no second,
+hand-maintained schema to drift out of sync. `lib/analysis/profiles.ts` no longer has a
+`toolInputSchema` field at all. **Strongly recommend Lovable's backend do the same** — if its stack has
+an equivalent (e.g. a Zod-to-JSON-Schema helper, or a schema library its LLM SDK consumes directly),
+use it, rather than hand-transcribing the schema a third time in a third language.
 
 ## 6b. Second technical issue found and fixed this round: build-time DB dependency
 
@@ -229,22 +227,24 @@ succeeds with zero environment variables configured. **Apply the same discipline
 function** — don't let a database/client singleton be constructed at module-import time if the platform
 might import the module (for bundling, type-checking, or route analysis) before secrets are available.
 
-## 7. Test/build status (this repository, this round)
+## 7. Test/build status (this repository)
 
 ```
-npx vitest run     → 8 test files, 52 tests, all passing
+npx vitest run     → 9 test files, 57 tests, all passing
 npx eslint .        → clean
 npx tsc --noEmit    → clean (after `next typegen`, which next build also runs)
 npm run build       → clean, verified with zero environment variables set (see §6b)
 ```
 
-New test files added this round: `tests/analysis-service.test.ts` (AI failure, malformed model response,
-duplicate/cache reuse, success path — this was a real coverage gap, `lib/analysis/service.ts` had no
-tests before), `tests/import.test.ts` (full orchestration: invalid URL, unknown creator, duplicate
-youtubeVideoId prevention, failure propagation), `tests/profile-schema-consistency.test.ts` (§6), plus a
-new case in `tests/transcript-service.test.ts` proving a provider that throws a raw non-typed error
-(e.g. a JSON parse crash on a malformed response) is safely converted to a typed `UNKNOWN_ERROR` rather
-than crashing the pipeline.
+Notable coverage: `tests/analysis-service.test.ts` (duplicate/cache reuse, provider failure, malformed/
+incomplete response, success — `lib/analysis/service.ts` had no tests originally), `tests/openai-provider.test.ts`
+(the OpenAI wrapper's success/network-failure/incomplete-response handling, via a mocked SDK client —
+this is the boundary that actually talks to OpenAI, so it's tested directly rather than only through
+`analyzeVideo`), `tests/import.test.ts` (full orchestration: invalid URL, unknown creator, duplicate
+youtubeVideoId prevention, failure propagation), `tests/proxy.test.ts` (Basic Auth gate: open when
+unconfigured, rejects missing/wrong credentials, accepts correct ones), plus a case in
+`tests/transcript-service.test.ts` proving a provider that throws a raw non-typed error is safely
+converted to a typed `UNKNOWN_ERROR` rather than crashing the pipeline.
 
 **Every one of these is a mocked test.** They prove the code's logic is internally correct and
 self-consistent. They do not and cannot prove the real integrations work — see §2.
@@ -280,20 +280,23 @@ build.
 
 ## 9. Architecture boundaries Lovable must respect (so Claude Code doesn't have to rebuild)
 
-1. **API keys server-side only.** All four secrets (`DATABASE_URL`/Supabase equivalent,
-   `FREE_TRANSCRIPT_API_KEY`, `SUPADATA_API_KEY`, `ANTHROPIC_API_KEY`) live only in backend/edge function
-   environment config, never in client bundle code or client-visible network calls.
+1. **API keys server-side only.** All secrets (`DATABASE_URL`/Supabase equivalent,
+   `FREE_TRANSCRIPT_API_KEY` [optional — see §3], `SUPADATA_API_KEY`, `OPENAI_API_KEY`) live only in
+   backend/edge function environment config, never in client bundle code or client-visible network calls.
 2. **One backend entry point for transcript retrieval**, e.g. a single `getTranscript(videoId)`
    function/edge function. It should internally: check the database for an existing transcript → try the
    primary provider → try the fallback provider (native-caption mode only, per §3) → return a normalised
    `NormalisedTranscript` (§4) or a typed failure. The UI and the analysis step never talk to
    FreeTranscriptAPI/Supadata directly, and never know which provider actually served the result.
 3. **One backend entry point for analysis**, e.g. `analyzeVideo(transcript)`, using the prompt/schema in
-   §5. The UI never calls Anthropic directly.
+   §5, behind its own small interface (this repo's `lib/llm/provider.ts`) rather than an OpenAI-specific
+   shape leaking into the rest of the app. The UI never calls OpenAI directly. This is not hypothetical
+   caution — this exact codebase swapped its LLM provider once already (Anthropic → OpenAI) with zero
+   changes outside `lib/llm/` and one new file, specifically because this boundary existed from the start.
 4. **Provider implementation is swappable.** Keep FreeTranscriptAPI/Supadata-specific parsing inside
    their own small functions/files, isolated behind the normalised-transcript boundary — so if a
-   provider's real contract turns out to differ (likely, per §3), fixing it touches one file, not the UI
-   or the analysis step.
+   provider's real contract turns out to differ (see §3's unconfirmed fields), fixing it touches one
+   file, not the UI or the analysis step.
 5. **Sensible data structures, not UI-shaped ones.** Store the normalised transcript and the full
    structured analysis JSON as returned by the schema in §5 — don't flatten either into bespoke
    UI-specific columns/fields. The review screen reads from the stored JSON; it doesn't redefine the
@@ -305,31 +308,37 @@ build.
    referencing it by ID — don't hardcode "there is only ever one creator" into the schema, even though
    the UI behaves as if there is. This is the one decision that most determines whether Claude Code can
    add Michael Pizzino later without a schema migration.
+8. **Gate the whole app behind a single shared credential (HTTP Basic Auth or equivalent) before it is
+   reachable on a public URL** — every submission triggers real paid transcript-provider and OpenAI
+   requests, and this is a personal app with exactly one legitimate user. This repo does it with ~30
+   lines of middleware and zero new UI (the browser's native Basic Auth prompt is the login screen) — do
+   not build a real auth system, but do not ship without this either.
 
 None of the above asks Lovable to build multi-creator UI, history, or provider-management tooling — only
 to shape the plumbing so those remain additive later.
 
 ## 10. What must be resolved BEFORE spending Lovable credits
 
-**One real blocker, stated plainly:** nobody has yet run this pipeline against real credentials and real
-network access — not in this session (hard-blocked, see §2's curl evidence), and, as far as this
-session's history shows, not anywhere else either. The provider contract in §3 is a best-effort design,
-not a verified fact.
+**Status: infrastructure is live; the one remaining blocker is credentials, not access.** A real
+Postgres database and a real deployed web service now exist on Render (§2), and this exact codebase's
+build/migrate/start sequence has already been proven against them, up to the point of needing secrets.
+Nobody has yet run this pipeline against real transcript-provider/OpenAI credentials, because that
+requires either pasting them in or a human opening the deployed `/harness` page — neither is possible
+from this sandbox (no outbound access to anything but `api.anthropic.com`, see §2). That is a
+credentials gap now, not an infrastructure or code gap.
 
-**Recommended action, in order of cost:** before writing the Lovable build prompt, run this repo's own
-`/harness` page (already built, already tested at the unit level — see §7) from an environment with real
-network access and real `DATABASE_URL`/`FREE_TRANSCRIPT_API_KEY`/`SUPADATA_API_KEY`/`ANTHROPIC_API_KEY`
-values (a local machine, or a Claude Code session/environment without this sandbox's network
-restriction) against the real video identified in §2
-(`https://www.youtube.com/watch?v=95Sg5orepBE`). This is a five-minute check that answers the two
-open questions this handoff cannot: (a) do the provider adapters' field-mappings need fixing, and (b)
-does the analysis prompt/schema produce a genuinely good review on real content. Either finding is far
-cheaper to act on here than inside a Lovable build.
+**Recommended action:** once `DATABASE_URL`, `OPENAI_API_KEY`, and (optionally — see §3)
+`SUPADATA_API_KEY` are set on the Render service, open the deployed `/harness` page and submit the real
+video identified in §2 (`https://www.youtube.com/watch?v=95Sg5orepBE`). `FREE_TRANSCRIPT_API_KEY` is
+not required — its free tier is keyless. This is a five-minute check that answers the two open
+questions this handoff cannot: (a) does the FreeTranscriptAPI/Supadata field-mapping need fixing, and
+(b) does the analysis prompt/schema produce a genuinely good review on real content. Either finding is
+far cheaper to act on here than inside a Lovable build.
 
 If that isn't practical before Lovable starts, the fallback is to accept the risk explicitly: tell
 Lovable up front that the provider contract is unverified and budget one iteration for Lovable (or
 Claude Code immediately after) to correct field-mapping once it sees a real response — but that is
 exactly the credit spend this exercise was meant to avoid, so treat it as a fallback, not the plan.
 
-No other credential, network, or account blocker was found — GitHub push access for this repository
-worked normally this session.
+No credential, network, or account blocker was found for GitHub or Render — both worked normally via
+their own APIs, with zero dashboard steps.

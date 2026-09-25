@@ -16,7 +16,7 @@ export type ImportResult =
  * (duplicate-safe on youtubeVideoId) -> getTranscript -> analyzeVideo.
  * Both getTranscript and analyzeVideo are themselves idempotent (return the
  * stored result if one already exists), so re-importing the same URL is
- * cheap and makes no redundant provider or Anthropic calls.
+ * cheap and makes no redundant transcript-provider or LLM calls.
  */
 export async function importVideo(creatorSlug: string, rawUrl: string): Promise<ImportResult> {
   const parsed = parseYoutubeUrl(rawUrl);

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { checkDatabase, checkAnthropic, checkFreeTranscriptApi, checkSupadata } from "@/lib/health";
+import { checkDatabase, checkOpenAi, checkFreeTranscriptApi, checkSupadata } from "@/lib/health";
 
 export async function GET() {
-  const [database, anthropic, freeTranscriptApi, supadata] = await Promise.all([
+  const [database, openai, freeTranscriptApi, supadata] = await Promise.all([
     checkDatabase(),
-    checkAnthropic(),
+    checkOpenAi(),
     checkFreeTranscriptApi(),
     checkSupadata(),
   ]);
@@ -25,7 +25,7 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    checks: [database, anthropic, freeTranscriptApi, supadata],
+    checks: [database, openai, freeTranscriptApi, supadata],
     lastImport,
   });
 }

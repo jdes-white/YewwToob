@@ -67,7 +67,7 @@ export default function HarnessPage() {
     <main className="mx-auto max-w-3xl p-8 font-sans">
       <h1 className="text-2xl font-semibold">Phase 0 Integration Harness</h1>
       <p className="mt-2 text-sm text-neutral-500">
-        Submit a real YouTube URL to run the full pipeline: transcript provider → Neon → Anthropic → Neon. This is a
+        Submit a real YouTube URL to run the full pipeline: transcript provider → database → OpenAI → database. This is a
         diagnostic tool, not the product UI.
       </p>
 
